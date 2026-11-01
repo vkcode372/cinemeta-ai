@@ -1,13 +1,12 @@
 import type { RequestHandler } from 'express';
 import { AppError } from '../errors/app-error.js';
-import { listQuerySchema } from '../validators/list.validators.js';
+import { movieQuerySchema } from '../validators/list.validators.js';
 import * as catalog from '../services/catalog.service.js';
 
 export const list: RequestHandler = async (req, res, next) => {
   try {
-    const { page, limit } = listQuerySchema.parse(req.query);
-    const search = typeof req.query.search === 'string' ? req.query.search : undefined;
-    res.json(await catalog.listMovies(page, limit, search));
+    const { page, limit, search, title, genre, language } = movieQuerySchema.parse(req.query);
+    res.json(await catalog.listMovies(page, limit, { search, title, genre, language }));
   } catch (error) { next(error); }
 };
 export const get: RequestHandler = async (req, res, next) => {

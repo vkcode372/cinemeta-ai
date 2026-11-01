@@ -1,0 +1,124 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    logging: *default-logging
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cinemate}
+      POSTGRES_USER: ${POSTGRES_USER:-cinemate}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker; run docker compose --env-file .env.docker up --build -d}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cinemate} -d ${POSTGRES_DB:-cinemate}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [cinemate]
+
+  backend:
+    logging: *default-logging
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgres://${POSTGRES_USER:-cinemate}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cinemate}
+      AI_CLIENT_BASE_URL: http://ai-client:4200
+      AI_CLIENT_SERVICE_TOKEN: ${SERVICE_TOKEN:?Set SERVICE_TOKEN in .env.docker}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.docker}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose: ["4000"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [cinemate]
+
+  mcp-server:
+    logging: *default-logging
+    build:
+      context: .
+      dockerfile: mcp-server/Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 4100
+      HOST: 0.0.0.0
+      BACKEND_BASE_URL: http://backend:4000
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.docker}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    expose: ["4100"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4100/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [cinemate]
+
+  ai-client:
+    logging: *default-logging
+    build:
+      context: .
+      dockerfile: ai-client/Dockerfile
+    environment:
+      NODE_ENV: production
+      AI_CLIENT_PORT: 4200
+      AI_CLIENT_HOST: 0.0.0.0
+      MCP_SERVER_URL: http://mcp-server:4100/mcp
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.docker}
+      AI_CLIENT_SERVICE_TOKEN: ${SERVICE_TOKEN:?Set SERVICE_TOKEN in .env.docker}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:?Set GEMINI_API_KEY in .env.docker}
+      GEMINI_MODEL: ${GEMINI_MODEL:?Set GEMINI_MODEL in .env.docker}
+    depends_on:
+      mcp-server:
+        condition: service_healthy
+    expose: ["4200"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4200/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [cinemate]
+
+  frontend:
+    logging: *default-logging
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        BACKEND_BASE_URL: http://backend:4000
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      BACKEND_BASE_URL: http://backend:4000
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [cinemate]
+
+volumes:
+  postgres_data:
+
+networks:
+  cinemate:
+    driver: bridge

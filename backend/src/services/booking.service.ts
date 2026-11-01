@@ -1,8 +1,8 @@
 import { Booking, BookingSeat, Show } from '../models/index.js';
 
-export async function listBookings(userId: string, page: number, limit: number) {
+export async function listBookings(userId: string, page: number, limit: number, status?: 'pending' | 'confirmed' | 'cancelled') {
   const result = await Booking.findAndCountAll({
-    where: { userId },
+    where: { userId, ...(status ? { status } : {}) },
     include: [{ model: Show, as: 'show' }, { model: BookingSeat, as: 'seats' }],
     limit,
     offset: (page - 1) * limit,

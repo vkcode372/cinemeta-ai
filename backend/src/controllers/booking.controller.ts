@@ -1,12 +1,12 @@
 import type { RequestHandler } from 'express';
 import { AppError } from '../errors/app-error.js';
-import { listQuerySchema } from '../validators/list.validators.js';
+import { bookingQuerySchema } from '../validators/list.validators.js';
 import * as bookings from '../services/booking.service.js';
 
 export const list: RequestHandler = async (req, res, next) => {
   try {
-    const { page, limit } = listQuerySchema.parse(req.query);
-    res.json(await bookings.listBookings(req.user!.id, page, limit));
+    const { page, limit, status } = bookingQuerySchema.parse(req.query);
+    res.json(await bookings.listBookings(req.user!.id, page, limit, status));
   } catch (error) { next(error); }
 };
 export const get: RequestHandler = async (req, res, next) => {

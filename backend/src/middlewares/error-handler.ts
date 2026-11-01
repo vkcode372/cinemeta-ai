@@ -3,7 +3,8 @@ import { UniqueConstraintError, ValidationError } from 'sequelize';
 import { ZodError } from 'zod';
 import { AppError } from '../errors/app-error.js';
 
-export const errorHandler: ErrorRequestHandler = (error: unknown, _req, res) => {
+export const errorHandler: ErrorRequestHandler = (error: unknown, _req, res, _next) => {
+  void _next;
   if (error instanceof AppError) {
     res.status(error.statusCode).json({ error: { message: error.message } });
     return;

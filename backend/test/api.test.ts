@@ -1,11 +1,14 @@
 import request from 'supertest';
 import { randomUUID } from 'node:crypto';
+import jwt from 'jsonwebtoken';
 import { app } from '../src/app.js';
 import { sequelize, User, Movie, Cinema, Show, Booking, BookingSeat, Payment } from '../src/models/index.js';
 
 describe('API integration', () => {
   const testEmail = `integration-${randomUUID()}@example.test`;
-  let token: string;
+  const otherTestEmail = `integration-other-${randomUUID()}@example.test`;
+  let authCookie: string;
+  let userId: string;
   let movieId: string;
   let bookingId: string;
   let cinemaId: string;
@@ -25,6 +28,7 @@ describe('API integration', () => {
       if (cinemaId) await Cinema.destroy({ where: { id: cinemaId } });
       if (movieId) await Movie.destroy({ where: { id: movieId } });
       if (user) await User.destroy({ where: { id: String(user.get('id')) } });
+      await User.destroy({ where: { email: otherTestEmail } });
     }
     await sequelize.close();
   });
@@ -37,8 +41,31 @@ describe('API integration', () => {
     expect(created.body.data).not.toHaveProperty('passwordHash');
     const loggedIn = await request(app).post('/api/auth/login').send({ email: testEmail, password: 'Password123!' });
     expect(loggedIn.status).toBe(200);
-    token = loggedIn.body.data.token;
+    expect(loggedIn.body.data).not.toHaveProperty('token');
+    expect(loggedIn.headers['set-cookie']).toEqual(expect.arrayContaining([expect.stringContaining('HttpOnly'), expect.stringContaining('SameSite=Strict')]));
+    expect(loggedIn.headers['set-cookie']).toEqual(expect.arrayContaining([expect.stringContaining('Path=/;')]));
+    const loginCookies = loggedIn.headers['set-cookie'];
+    const loginCookie = (Array.isArray(loginCookies) ? loginCookies : [loginCookies]).find((cookie) => cookie?.startsWith('cinemate_token='));
+    if (!loginCookie) throw new Error('Login response did not set the authentication cookie');
+    authCookie = loginCookie.split(';')[0];
+    userId = created.body.data.id;
+    const profile = await request(app).get('/api/auth/me').set('Cookie', authCookie);
+    expect(profile.status).toBe(200);
+    expect(profile.body.data).toEqual({ id: userId, name: 'Test User', email: testEmail });
+    expect(profile.body.data).not.toHaveProperty('passwordHash');
     expect((await request(app).post('/api/auth/login').send({ email: testEmail, password: 'wrong-password' })).status).toBe(401);
+  });
+
+  it('rejects an expired JWT', async () => {
+    const expiredToken = jwt.sign({}, process.env.JWT_SECRET!, {
+      algorithm: 'HS256',
+      subject: randomUUID(),
+      expiresIn: -1,
+      issuer: 'cinemate-api',
+      audience: 'cinemate-client',
+    });
+    const response = await request(app).get('/api/bookings').set('Authorization', `Bearer ${expiredToken}`);
+    expect(response.status).toBe(401);
   });
 
   it('lists and retrieves movies and validates IDs', async () => {
@@ -62,11 +89,27 @@ describe('API integration', () => {
     bookingId = String(booking.get('id'));
     await BookingSeat.create({ bookingId, showId, seatNumber: 'A1', price: '12.50' });
     await Payment.create({ bookingId, amount: '12.50', currency: 'USD', status: 'succeeded', provider: 'test', providerReference: 'TEST-1' });
-    const bookings = await request(app).get('/api/bookings').set('Authorization', `Bearer ${token}`);
+    const bookings = await request(app).get('/api/bookings').set('Cookie', authCookie);
     expect(bookings.status).toBe(200);
     expect(bookings.body.data).toHaveLength(1);
-    expect((await request(app).get(`/api/bookings/${bookingId}`).set('Authorization', `Bearer ${token}`)).status).toBe(200);
-    expect((await request(app).get('/api/payments/').set('Authorization', `Bearer ${token}`)).body.data).toHaveLength(1);
+    expect((await request(app).get(`/api/bookings/${bookingId}`).set('Cookie', authCookie)).status).toBe(200);
+    const ownPayments = await request(app).get('/api/payments/').set('Cookie', authCookie);
+    expect(ownPayments.body.data).toHaveLength(1);
+    expect(ownPayments.body.data[0]).not.toHaveProperty('providerReference');
     expect((await request(app).get(`/api/bookings/${bookingId}`).set('Authorization', 'Bearer invalid')).status).toBe(401);
+
+    const otherRegistration = await request(app).post('/api/auth/register').send({ name: 'Other User', email: otherTestEmail, password: 'Password123!' });
+    expect(otherRegistration.status).toBe(201);
+    const otherLogin = await request(app).post('/api/auth/login').send({ email: otherTestEmail, password: 'Password123!' });
+    const otherCookies = otherLogin.headers['set-cookie'];
+    const otherCookie = (Array.isArray(otherCookies) ? otherCookies : [otherCookies]).find((cookie) => cookie?.startsWith('cinemate_token='));
+    if (!otherCookie) throw new Error('Second login response did not set the authentication cookie');
+    const otherBookings = await request(app).get(`/api/bookings?userId=${userId}`).set('Cookie', otherCookie);
+    expect(otherBookings.status).toBe(200);
+    expect(otherBookings.body.data).toHaveLength(0);
+    expect((await request(app).get(`/api/bookings/${bookingId}`).set('Cookie', otherCookie)).status).toBe(404);
+    const otherPayments = await request(app).get(`/api/payments/?userId=${userId}`).set('Cookie', otherCookie);
+    expect(otherPayments.status).toBe(200);
+    expect(otherPayments.body.data).toHaveLength(0);
   });
 });

@@ -5,6 +5,11 @@ const bcrypt = require('bcryptjs');
 
 module.exports = {
   async up(queryInterface) {
+    const [existingDemoUser] = await queryInterface.sequelize.query(
+      "SELECT id FROM users WHERE email = 'alex@example.com' LIMIT 1",
+    );
+    if (existingDemoUser.length > 0) return;
+
     const now = new Date();
     const movies = [
       ['Dune: Part Two', 'Paul Atreides unites with Chani and the Fremen while seeking revenge.', 166, 'Science Fiction', 'English', '2024-03-01', 8.5],
