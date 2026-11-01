@@ -1,0 +1,8 @@
+{
+  "name": "@cinemate/ai-client",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": { "build": "tsc -p tsconfig.json", "lint": "eslint src --ext .ts" },
+  "dependencies": { "dotenv": "^16.5.0", "zod": "^3.25.67" },
+  "devDependencies": { "@types/node": "^22.15.30" }
+}

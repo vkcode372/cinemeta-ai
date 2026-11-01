@@ -1,0 +1,18 @@
+import type { RequestHandler } from 'express';
+import { AppError } from '../errors/app-error.js';
+import { listQuerySchema } from '../validators/list.validators.js';
+import * as bookings from '../services/booking.service.js';
+
+export const list: RequestHandler = async (req, res, next) => {
+  try {
+    const { page, limit } = listQuerySchema.parse(req.query);
+    res.json(await bookings.listBookings(req.user!.id, page, limit));
+  } catch (error) { next(error); }
+};
+export const get: RequestHandler = async (req, res, next) => {
+  try {
+    const booking = await bookings.getBooking(req.user!.id, String(req.params.id));
+    if (!booking) throw new AppError('Booking not found', 404);
+    res.json({ data: booking });
+  } catch (error) { next(error); }
+};
