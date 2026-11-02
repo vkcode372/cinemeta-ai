@@ -80,17 +80,48 @@ services:
       MCP_SERVER_URL: http://mcp-server:4100/mcp
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.docker}
       AI_CLIENT_SERVICE_TOKEN: ${SERVICE_TOKEN:?Set SERVICE_TOKEN in .env.docker}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:?Set GEMINI_API_KEY in .env.docker}
-      GEMINI_MODEL: ${GEMINI_MODEL:?Set GEMINI_MODEL in .env.docker}
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1:8b}
     depends_on:
       mcp-server:
         condition: service_healthy
+      ollama:
+        condition: service_healthy
+      ollama-model-init:
+        condition: service_completed_successfully
     expose: ["4200"]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4200/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 10
+    networks: [cinemate]
+
+  ollama:
+    image: ollama/ollama:latest
+    logging: *default-logging
+    volumes:
+      - ollama_data:/root/.ollama
+    expose: ["11434"]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [cinemate]
+
+  ollama-model-init:
+    image: ollama/ollama:latest
+    logging: *default-logging
+    environment:
+      OLLAMA_HOST: ollama:11434
+    entrypoint: ["ollama"]
+    command: ["pull", "${OLLAMA_MODEL:-llama3.1:8b}"]
+    volumes:
+      - ollama_data:/root/.ollama
+    depends_on:
+      ollama:
+        condition: service_healthy
     networks: [cinemate]
 
   frontend:
@@ -118,6 +149,7 @@ services:
 
 volumes:
   postgres_data:
+  ollama_data:
 
 networks:
   cinemate:

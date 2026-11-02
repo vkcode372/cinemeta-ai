@@ -15,6 +15,7 @@ export async function chat(
   if (!config.success) throw new AppError('AI assistant is not configured', 503);
   let response: Response;
   try {
+    console.log(`${config.data.AI_CLIENT_BASE_URL.replace(/\/$/, '')}/internal/chat`)
     response = await fetch(`${config.data.AI_CLIENT_BASE_URL.replace(/\/$/, '')}/internal/chat`, {
       method: 'POST',
       headers: {

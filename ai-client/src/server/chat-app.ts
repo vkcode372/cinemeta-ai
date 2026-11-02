@@ -4,9 +4,9 @@ import { z } from 'zod';
 import { AgentRuntime } from '../agent/agent-runtime.js';
 import { McpClient } from '../client/mcp-client.js';
 import { McpConnectionError } from '../errors.js';
-import { GeminiConfigurationError } from '../llm/gemini.config.js';
-import { GeminiProvider } from '../llm/gemini.provider.js';
-import { GeminiProviderError } from '../llm/gemini.provider.js';
+import { OllamaConfigurationError } from '../llm/ollama.config.js';
+import { OllamaProvider } from '../llm/ollama.provider.js';
+import { OllamaProviderError } from '../llm/ollama.provider.js';
 import type { LlmInterface } from '../llm/llm.interface.js';
 
 const requestSchema = z.object({
@@ -64,6 +64,7 @@ export function createChatApp(config: ChatServerConfig) {
   };
 
   app.post('/internal/chat', authenticateService, async (req, res) => {
+    console.log(`Received chat request from user ${res.locals.userId} for conversation ${req.body.conversationId}`);
     const parsed = requestSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: { message: 'Invalid chat request', details: parsed.error.issues } });
@@ -83,21 +84,27 @@ export function createChatApp(config: ChatServerConfig) {
       sessions.delete(sessionKey);
       session = undefined;
     }
-
+  console.log(`Processing chat message for user ${verifiedUserId} in 
+    conversation ${conversationId} 
+    ${JSON.stringify({ sessionExists: !!session, messageLength: message.length })}
+    ${JSON.stringify(config)}`);
     try {
+      console.log(session ? 'Using existing session' : 'Creating new session');
       if (!session) {
         const mcp = new McpClient({ serverUrl: config.mcpServerUrl, accessToken: res.locals.accessToken as string });
         await mcp.connect();
         session = {
           accessToken: res.locals.accessToken as string,
           mcp,
-          agent: new AgentRuntime(config.providerFactory?.() ?? new GeminiProvider(), mcp, { maxIterations: config.maxIterations }),
+          agent: new AgentRuntime(config.providerFactory?.() ?? new OllamaProvider(), mcp, { maxIterations: config.maxIterations }),
           lastUsed: Date.now(),
         };
         sessions.set(sessionKey, session);
       }
       session.lastUsed = Date.now();
+      console.log(JSON.stringify(message));
       const result = await session.agent.sendMessage(message);
+console.log(JSON.stringify(result),"result");
       res.json({ data: {
         conversationId,
         text: result.text,
@@ -106,6 +113,7 @@ export function createChatApp(config: ChatServerConfig) {
         iterations: result.iterations,
       } });
     } catch (error) {
+      console.log(error,"error");
       const cause = error instanceof Error ? error : new Error('Unknown AI chat error');
       const rootCause = cause.cause instanceof Error ? cause.cause : undefined;
       const errorDetails: Record<string, unknown> = {
@@ -114,7 +122,7 @@ export function createChatApp(config: ChatServerConfig) {
         errorMessage: cause.message.slice(0, 300),
       };
       if (error instanceof McpConnectionError) errorDetails.mcpStatus = error.statusCode ?? null;
-      if (error instanceof GeminiProviderError) errorDetails.geminiStatus = error.statusCode ?? null;
+      if (error instanceof OllamaProviderError) errorDetails.ollamaStatus = error.statusCode ?? null;
       if (rootCause) {
         errorDetails.causeName = rootCause.name;
         errorDetails.causeMessage = rootCause.message.slice(0, 300);
@@ -124,20 +132,12 @@ export function createChatApp(config: ChatServerConfig) {
         res.status(503).json({ error: { code: 'MCP_UNAVAILABLE', message: 'Movie tools are temporarily unavailable. Please try again soon.' } });
         return;
       }
-      if (error instanceof GeminiConfigurationError) {
-        res.status(503).json({ error: { code: 'GEMINI_NOT_CONFIGURED', message: 'The AI assistant is not configured right now.' } });
+      if (error instanceof OllamaConfigurationError) {
+        res.status(503).json({ error: { code: 'OLLAMA_NOT_CONFIGURED', message: 'The AI assistant is not configured right now.' } });
         return;
       }
-      if (error instanceof GeminiProviderError) {
-        if (error.statusCode === 429) {
-          res.status(429).json({ error: { code: 'GEMINI_RATE_LIMIT', message: 'The assistant is busy. Please try again in a moment.' } });
-          return;
-        }
-        if (error.statusCode === 401 || error.statusCode === 403) {
-          res.status(503).json({ error: { code: 'GEMINI_API_KEY_INVALID', message: 'The AI assistant is temporarily unavailable.' } });
-          return;
-        }
-        res.status(503).json({ error: { code: 'GEMINI_UNAVAILABLE', message: 'The AI service could not complete that request. Please try again.' } });
+      if (error instanceof OllamaProviderError) {
+        res.status(503).json({ error: { code: 'OLLAMA_UNAVAILABLE', message: 'The AI service could not complete that request. Please try again.' } });
         return;
       }
       res.status(502).json({ error: { code: 'AI_CHAT_FAILED', message: 'The assistant could not complete that request. Please try again.' } });

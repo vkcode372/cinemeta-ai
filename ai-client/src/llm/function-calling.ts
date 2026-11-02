@@ -36,7 +36,7 @@ function resultObject(result: McpToolResult): Record<string, unknown> {
     .filter(Boolean)
     .join('\n');
   if (!text && result.structuredContent !== undefined) return { output: result.structuredContent };
-  if (!text) throw new FunctionCallingWorkflowError('MCP tool returned no content that Gemini can use');
+  if (!text) throw new FunctionCallingWorkflowError('MCP tool returned no content the model can use');
   try {
     return { output: JSON.parse(text) as unknown };
   } catch {
@@ -50,7 +50,7 @@ function toolFailureMessage(error: unknown): string {
   return 'Tool execution failed';
 }
 
-/** Runs a single Gemini function-call round; persistent conversation/agent loops are deferred. */
+/** Runs a single tool-call round; persistent conversation/agent loops are deferred. */
 export async function runFunctionCallingTurn(
   provider: LlmInterface,
   mcpClient: McpClient,
@@ -76,7 +76,7 @@ export async function runFunctionCallingTurn(
 
   for (const call of calls) {
     const name = call.name;
-    if (!name) throw new FunctionCallingWorkflowError('Gemini returned a function call without a name');
+    if (!name) throw new FunctionCallingWorkflowError('The model returned a function call without a name');
 
     let response: Record<string, unknown>;
     const tool = adapted.byName.get(name);
@@ -112,7 +112,7 @@ export async function runFunctionCallingTurn(
   });
 
   if (finalResponse.functionCalls.length) {
-    throw new FunctionCallingWorkflowError('Gemini requested another tool round; start a new turn for the next request');
+    throw new FunctionCallingWorkflowError('The model requested another tool round; start a new turn for the next request');
   }
   return { text: finalResponse.text ?? '', toolCalls, toolErrors };
 }

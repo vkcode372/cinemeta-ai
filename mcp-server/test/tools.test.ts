@@ -188,13 +188,21 @@ describe('CineMate authenticated MCP tools over Streamable HTTP', () => {
     expect(response.status).toBe(403);
   });
 
-  it('registers and validates all five tools with strict schemas', async () => {
+  it('registers and validates all six tools with strict schemas', async () => {
     const listed = await ownerClient.listTools();
     expect(listed.tools.map((tool) => tool.name).sort()).toEqual([
-      'get_booking_details', 'get_movie_details', 'get_my_bookings', 'get_payment_status', 'search_movies',
+      'get_booking_details', 'get_movie_details', 'get_my_bookings', 'get_my_profile', 'get_payment_status', 'search_movies',
     ]);
     const invalid = await ownerClient.callTool({ name: 'get_my_bookings', arguments: { userId: otherUserId } });
     expect(invalid.isError).toBe(true);
+  });
+
+  it('returns only the authenticated user’s public profile', async () => {
+    const result = await ownerClient.callTool({ name: 'get_my_profile', arguments: {} });
+    const profile = jsonFrom<{ data: { id: string; name: string; email: string } }>(result);
+    expect(profile.data).toMatchObject({ id: ownerUserId, email: ownerEmail });
+    expect(profile.data).not.toHaveProperty('passwordHash');
+    expect(profile.data).not.toHaveProperty('password_hash');
   });
 
   it('searches movies by title, genre, and language', async () => {

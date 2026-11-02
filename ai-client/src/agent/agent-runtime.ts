@@ -5,7 +5,7 @@ import type { McpToolResult } from '../types/index.js';
 import type { LlmInterface } from '../llm/llm.interface.js';
 
 export interface AgentRuntimeOptions {
-  /** Maximum number of Gemini/tool-call rounds in one user turn. */
+  /** Maximum number of model/tool-call rounds in one user turn. */
   maxIterations?: number;
 }
 
@@ -90,6 +90,7 @@ export class AgentRuntime {
 
   async sendMessage(message: string): Promise<AgentTurnResult> {
     const normalizedMessage = message.trim();
+    console.log(`Sending message: ${normalizedMessage}`);
     if (!normalizedMessage) throw new AgentRuntimeError('Message must not be empty');
 
     const userContent: Content = { role: 'user', parts: [{ text: normalizedMessage }] };
@@ -99,13 +100,16 @@ export class AgentRuntime {
     let iterations = 0;
 
     for (; iterations < this.maxIterations; iterations += 1) {
+      console.log(`Iteration ${iterations + 1} of ${this.maxIterations}`);
       // Refresh the allow-list at each round, so execution is limited to tools advertised
       // by the currently authenticated MCP session.
       const discovered = await this.mcpClient.listTools();
+      console.log(`Discovered ${discovered.tools.length} tools: ${discovered.tools.map((t) => t.name).join(', ')}`);
       const adapted = adaptMcpTools(discovered.tools);
       const response = await this.provider.generateResponse(this.history, {
         functionDeclarations: adapted.declarations,
       });
+      console.log(`LLM returned ${JSON.stringify(response)} ${response.functionCalls.length} function calls`);
 
       if (!response.functionCalls.length) {
         if (response.candidateContent) this.history.push(response.candidateContent);
@@ -125,7 +129,7 @@ export class AgentRuntime {
       for (const call of response.functionCalls) {
         const name = call.name;
         if (!name) {
-          throw new AgentRuntimeError('Gemini returned a tool call without a name');
+          throw new AgentRuntimeError('LLM returned a tool call without a name');
         }
 
         const tool = adapted.byName.get(name);
@@ -160,11 +164,11 @@ export class AgentRuntime {
       }
     }
 
-    // Do not execute further tool requests after the configured limit. Ask Gemini to
+    // Do not execute further tool requests after the configured limit. Ask the model to
     // summarize the results already collected with function calling disabled.
     const finalResponse = await this.provider.generateResponse(this.history, { disableFunctionCalling: true });
     if (finalResponse.functionCalls.length) {
-      throw new AgentRuntimeError('Gemini returned a function call after tool execution was disabled');
+      throw new AgentRuntimeError('LLM returned a function call after tool execution was disabled');
     }
     if (finalResponse.candidateContent) this.history.push(finalResponse.candidateContent);
     else if (finalResponse.text) this.history.push({ role: 'model', parts: [{ text: finalResponse.text }] });

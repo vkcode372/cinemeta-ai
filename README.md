@@ -1,6 +1,6 @@
 # CineMate AI
 
-An AI-powered movie booking assistant monorepo. Phase 1 establishes the independent application boundaries and shared developer tooling; it intentionally contains no booking business logic.
+An AI-powered movie booking assistant monorepo with a local demo booking flow, account-scoped booking data, and Ollama-powered chat.
 
 ## Architecture
 
@@ -11,18 +11,18 @@ frontend (Next.js server)
         | HTTP
 backend (Express / TypeScript) ---- PostgreSQL (Sequelize)
         | authenticated internal HTTP
-AI client (Gemini + MCP) --------- MCP server (MCP TypeScript SDK)
+AI client (Ollama + MCP) -------- MCP server (MCP TypeScript SDK)
 ```
 
 - **frontend** owns the browser experience and proxies same-origin API requests to the backend, preserving the HttpOnly auth cookie.
 - **backend** owns authentication, API validation, business services, and PostgreSQL persistence through Sequelize.
-- **ai-client** is an independent TypeScript package that hosts Gemini orchestration and its authenticated MCP client.
+- **ai-client** is an independent TypeScript package that hosts Ollama orchestration and its authenticated MCP client.
 - **mcp-server** exposes authenticated MCP tools and delegates authorization and business operations to the backend.
 - **Zod** is available for validation at external boundaries. Services are independently buildable and should not import one another's source.
 
 ## Prerequisites
 
-Node.js 20 or newer and npm. PostgreSQL is needed for backend and MCP integration; Gemini credentials are needed for live AI requests.
+Node.js 20 or newer and npm. PostgreSQL is needed for backend and MCP integration; Ollama is used for local LLM requests.
 
 ## Setup
 
@@ -45,7 +45,7 @@ From the repository root, run `npm install`, then copy each `.env.example` to `.
    if (-not (Test-Path frontend/.env)) { Copy-Item frontend/.env.example frontend/.env }
    ```
 
-   Set `DATABASE_URL` and a random `JWT_SECRET` of at least 32 characters in `backend/.env`. Use the same `JWT_SECRET` in `mcp-server/.env` and `ai-client/.env`. Set the same random value of at least 32 characters for `AI_CLIENT_SERVICE_TOKEN` in `backend/.env` and `ai-client/.env`. Set `MCP_SERVER_URL=http://127.0.0.1:4100/mcp`, plus `GEMINI_API_KEY` and `GEMINI_MODEL` in `ai-client/.env`. `frontend/.env` should use `BACKEND_BASE_URL=http://127.0.0.1:4000`. These are server-side values; do not rename them to `NEXT_PUBLIC_*`.
+   Set `DATABASE_URL` and a random `JWT_SECRET` of at least 32 characters in `backend/.env`. Use the same `JWT_SECRET` in `mcp-server/.env` and `ai-client/.env`. Set the same random value of at least 32 characters for `AI_CLIENT_SERVICE_TOKEN` in `backend/.env` and `ai-client/.env`. Set `MCP_SERVER_URL=http://127.0.0.1:4100/mcp`, `OLLAMA_BASE_URL=http://127.0.0.1:11434` and `OLLAMA_MODEL=llama3.1:8b` in `ai-client/.env`, then run `ollama pull llama3.1:8b`. `frontend/.env` should use `BACKEND_BASE_URL=http://127.0.0.1:4000`. These are server-side values; do not rename them to `NEXT_PUBLIC_*`.
 
 3. Create/update the schema and load the sample catalog and demo account:
 
@@ -89,7 +89,7 @@ Useful root commands:
 ```text
 backend/       Express API, PostgreSQL/Sequelize boundary
 mcp-server/    MCP protocol server
-ai-client/     Gemini agent runtime and MCP client integration boundary
+ai-client/     Ollama agent runtime and MCP client integration boundary
 frontend/      Next.js TypeScript application
 ```
 
@@ -98,6 +98,10 @@ See [AGENTS.md](./AGENTS.md) for coding standards and project rules.
 ## Backend API (Phase 2)
 
 The backend uses Express controllers for HTTP handling, services for data access and orchestration, Sequelize models for PostgreSQL, Zod for input validation, and a centralized JSON error handler. Movie listing and detail reads are public. Booking and payment reads require authentication and are scoped to the verified token subject. Passwords are hashed with bcrypt (cost 12); password hashes and provider payment references are not returned by API responses.
+
+### Demo booking flow
+
+Signed-in users can choose a future showtime and up to eight available seats on a movie page. `POST /api/bookings/` uses the verified JWT subject as `user_id`, then creates the booking, its `booking_seats`, and a successful `demo-no-charge` payment in one database transaction. The demo never requests card or payment credentials. The confirmation page loads the saved booking and payment state. Booking lists and the authenticated MCP tools read the same user-scoped records, so chat can answer questions about the booking, selected seats, movie/showtime, and payment status. A unique database index on `(show_id, seat_number)` and a show row lock prevent seats from being sold twice.
 
 ### Authentication flow
 
@@ -119,7 +123,7 @@ npm run build --workspace=@cinemate/backend
 npm run start --workspace=@cinemate/backend
 ```
 
-The seed includes five sample movies, a cinema with upcoming shows, and a demo account with a confirmed two-seat booking and successful demo payment. Demo login: `alex@example.com` / `DemoPass123!`. Change or remove this sample account outside local development.
+The seed includes five sample movies and a cinema with upcoming shows. A second seeder creates the chat demo user `d5a70736-edca-4913-9ba9-d573dfb3477d` (`jordan.lee@example.test` / `DemoPass123!`) with confirmed and pending bookings, linked seats, and payment records. These are local demo credentials only.
 
 Run the automated API integration tests against a separate PostgreSQL database when available. They create missing tables without dropping existing ones, use unique test users, and clean up their test records. `TEST_DATABASE_URL` overrides `DATABASE_URL` for the test process:
 
@@ -211,11 +215,12 @@ All schemas are strict and reject extra fields, including `userId`. User identit
 | --- | --- | --- |
 | `search_movies` | `{ title?: string, genre?: string, language?: string }` (at least one filter) | Searches title, genre, and language. |
 | `get_movie_details` | `{ movie_id: UUID }` | Returns movie details, shows, and cinema information. |
-| `get_my_bookings` | `{ status?: "pending" | "confirmed" | "cancelled" }` | Lists only the authenticated user's bookings. |
+| `get_my_profile` | `{}` | Returns the authenticated user's public name and email. |
+| `get_my_bookings` | `{ status?: "pending" | "confirmed" | "cancelled" | "active" }` | Lists only the authenticated user's bookings; `active` maps to `confirmed`. |
 | `get_booking_details` | `{ booking_id: UUID }` | Returns a booking only when the JWT owner matches. |
 | `get_payment_status` | `{ booking_id: UUID }` | Returns safe status/amount/currency data only for the owner's booking. |
 
-Run MCP integration tests with `npm run test --workspace=@cinemate/mcp-server`. The tests build the backend, create two users, call all five tools over Streamable HTTP, and verify cross-user access is denied.
+Run MCP integration tests with `npm run test --workspace=@cinemate/mcp-server`. The tests build the backend, create two users, call all six tools over Streamable HTTP, and verify cross-user access is denied.
 
 ## Custom MCP client (Phase 5)
 
@@ -243,21 +248,21 @@ try {
 }
 ```
 
-Run AI client integration tests with `npm run test --workspace=@cinemate/ai-client`. They launch local backend/MCP test servers, discover the five tools, execute movie search and booking listing, and verify invalid authentication and cross-user tool access are rejected. The LLM provider was added in Phase 6 below.
+Run AI client integration tests with `npm run test --workspace=@cinemate/ai-client`. They launch local backend/MCP test servers, discover the six tools, execute movie search and booking listing, and verify invalid authentication and cross-user tool access are rejected. The LLM provider was added in Phase 6 below.
 
-## Gemini provider (Phase 6)
+## Ollama provider
 
-The Gemini provider runs in the server-side `ai-client` workspace and uses the official `@google/genai` SDK. Set `GEMINI_API_KEY` and `GEMINI_MODEL` in `ai-client/.env`; both are required and the configured model is used for every request. Never put the API key in frontend code or a `NEXT_PUBLIC_*` variable.
+The Ollama provider runs in the server-side `ai-client` workspace and calls Ollama local chat API. Set `OLLAMA_BASE_URL` and `OLLAMA_MODEL` in `ai-client/.env`; defaults are `http://127.0.0.1:11434` and `llama3.1:8b`.
 
 ```env
-GEMINI_API_KEY=your-private-key
-GEMINI_MODEL=your-enabled-gemini-model
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=llama3.1:8b
 ```
 
-The function-calling turn discovers tools from the authenticated `McpClient` at request time, carries their names, descriptions, and JSON input schemas into Gemini, validates Gemini arguments locally, and executes only a discovered tool through that same authenticated MCP session. `userId`-style schema fields are rejected. MCP output is sent back as a Gemini function response, and the model is asked for one final response with additional function calling disabled. For persistent history and repeated tool-call rounds, use the Phase 7 agent runtime below.
+The function-calling turn discovers tools from the authenticated `McpClient` at request time, carries their names, descriptions, and JSON input schemas into Ollama, validates model arguments locally, and executes only a discovered tool through that same authenticated MCP session. `userId`-style schema fields are rejected. MCP output is sent back as an Ollama tool response, and the model is asked for one final response with additional function calling disabled. For persistent history and repeated tool-call rounds, use the Phase 7 agent runtime below.
 
 ```ts
-import { GeminiProvider, McpClient, runFunctionCallingTurn } from '@cinemate/ai-client';
+import { OllamaProvider, McpClient, runFunctionCallingTurn } from '@cinemate/ai-client';
 
 const mcp = new McpClient({
   serverUrl: process.env.MCP_SERVER_URL!,
@@ -266,14 +271,14 @@ const mcp = new McpClient({
 
 await mcp.connect();
 try {
-  const turn = await runFunctionCallingTurn(new GeminiProvider(), mcp, 'Find Avatar.');
+  const turn = await runFunctionCallingTurn(new OllamaProvider(), mcp, 'Find Avatar.');
   console.log(turn.text);
 } finally {
   await mcp.close();
 }
 ```
 
-`GeminiProviderError` distinguishes invalid API keys and rate limits (`retryable` is set for rate limits and server failures). Tool schema, argument, unknown-tool, MCP, and invalid-result failures are returned to Gemini as function errors or raised as typed client errors. Run TypeScript checks and tests with:
+`OllamaProviderError` reports Ollama connection and server failures. Tool schema, argument, unknown-tool, MCP, and invalid-result failures are returned as tool errors or raised as typed client errors. Run TypeScript checks and tests with:
 
 ```sh
 npm run build --workspace=@cinemate/ai-client
@@ -281,16 +286,16 @@ npm run lint --workspace=@cinemate/ai-client
 npm run test --workspace=@cinemate/ai-client
 ```
 
-Tests mock Gemini by default. To explicitly run the live Avatar function-calling test, set `RUN_LIVE_GEMINI_TESTS=true` in `ai-client/.env` along with `GEMINI_API_KEY` and `GEMINI_MODEL`; this requires network access to Google's Gemini API.
+Ensure Ollama is running and the configured model has been pulled before sending live requests.
 
 ## Agent runtime (Phase 7)
 
-`AgentRuntime` builds on the existing provider and MCP client. It keeps Gemini content history across messages, rediscovers tools on every tool-call round, validates arguments against the discovered MCP JSON schemas, and executes calls sequentially through the injected authenticated client. Each runtime must be created for one authenticated MCP client and must not be shared between users. The runtime takes no `userId`; MCP verifies the JWT and backend ownership checks remain authoritative.
+`AgentRuntime` builds on the existing provider and MCP client. It keeps conversation history across messages, rediscovers tools on every tool-call round, validates arguments against the discovered MCP JSON schemas, and executes calls sequentially through the injected authenticated client. Each runtime must be created for one authenticated MCP client and must not be shared between users. The runtime takes no `userId`; MCP verifies the JWT and backend ownership checks remain authoritative.
 
-The default limit is five Gemini/tool rounds per message (configurable from 1 through 12). At the limit, the runtime disables further function calling and asks Gemini to summarize the available results. Tool errors are returned to Gemini as function responses so it can explain a failure. Use `getConversationHistory()` to inspect a copy of the history or `clearConversation()` to start a fresh conversation.
+The default limit is five Ollama/tool rounds per message (configurable from 1 through 12). At the limit, the runtime disables further function calling and asks Ollama to summarize the available results. Tool errors are returned as tool responses so it can explain a failure. Use `getConversationHistory()` to inspect a copy of the history or `clearConversation()` to start a fresh conversation.
 
 ```ts
-import { AgentRuntime, GeminiProvider, McpClient } from '@cinemate/ai-client';
+import { AgentRuntime, OllamaProvider, McpClient } from '@cinemate/ai-client';
 
 const mcp = new McpClient({
   serverUrl: process.env.MCP_SERVER_URL!,
@@ -298,7 +303,7 @@ const mcp = new McpClient({
 });
 await mcp.connect();
 
-const agent = new AgentRuntime(new GeminiProvider(), mcp, { maxIterations: 5 });
+const agent = new AgentRuntime(new OllamaProvider(), mcp, { maxIterations: 5 });
 try {
   const first = await agent.sendMessage('Show my bookings.');
   console.log(first.text);
@@ -313,15 +318,15 @@ No agent-specific automated tests were added per the Phase 7 instruction. Run th
 
 ## Next.js frontend (Phase 8)
 
-The responsive dark cinema UI includes movie search and details, registration/login, private bookings, and an AI chat with Markdown, loading/tool status, and local browser history. Tailwind CSS 4 is configured with PostCSS. Authenticated routes are gated by the HttpOnly cookie; all private APIs still verify the JWT in the backend. The frontend never receives JWT contents or any Gemini/MCP secret. Login sets the cookie on the same-origin `/api` proxy; logout clears it.
+The responsive dark cinema UI includes movie search and details, registration/login, private bookings, and an AI chat with Markdown, loading/tool status, and local browser history. Tailwind CSS 4 is configured with PostCSS. Authenticated routes are gated by the HttpOnly cookie; all private APIs still verify the JWT in the backend. The frontend never receives JWT contents or any Ollama/MCP secret. Login sets the cookie on the same-origin `/api` proxy; logout clears it.
 
-The browser sends chat to `POST /api/ai/chat` with only a conversation ID and message. The backend authenticates the cookie and passes its verified `req.user.id` and verified JWT to the private AI client endpoint, protected by `AI_CLIENT_SERVICE_TOKEN`. The AI service independently verifies that JWT and checks the claimed ID matches its `sub`, then scopes a process-local agent/MCP session to that user and conversation ID. The MCP server and backend continue to enforce ownership. Chat messages are saved in browser local storage; active Gemini context is held in AI service memory for up to 30 idle minutes and is cleared when the AI service restarts.
+The browser sends chat to `POST /api/ai/chat` with only a conversation ID and message. The backend authenticates the cookie and passes its verified `req.user.id` and verified JWT to the private AI client endpoint, protected by `AI_CLIENT_SERVICE_TOKEN`. The AI service independently verifies that JWT and checks the claimed ID matches its `sub`, then scopes a process-local agent/MCP session to that user and conversation ID. The MCP server and backend continue to enforce ownership. Chat messages are saved in browser local storage; active Ollama conversation context is held in AI service memory for up to 30 idle minutes and is cleared when the AI service restarts.
 
 Set these server-side values in the package `.env` files (use long random values and keep `.env` files untracked):
 
 - `frontend/.env`: `BACKEND_BASE_URL=http://127.0.0.1:4000` (not a `NEXT_PUBLIC_*` variable).
 - `backend/.env`: `AI_CLIENT_BASE_URL=http://127.0.0.1:4200` and `AI_CLIENT_SERVICE_TOKEN`.
-- `ai-client/.env`: the same `AI_CLIENT_SERVICE_TOKEN`, backend's `JWT_SECRET`, `MCP_SERVER_URL`, `GEMINI_API_KEY`, and `GEMINI_MODEL`. The AI service binds to `127.0.0.1:4200` by default.
+- `ai-client/.env`: the same `AI_CLIENT_SERVICE_TOKEN`, backend's `JWT_SECRET`, `MCP_SERVER_URL`, `OLLAMA_BASE_URL`, and `OLLAMA_MODEL`. The AI service binds to `127.0.0.1:4200` by default.
 
 Start the backend and MCP server as described above, then start the AI client service and frontend in separate terminals:
 
@@ -335,7 +340,7 @@ The AI service provides `GET /health` and its chat endpoint is internal; the bro
 
 ## End-to-end verification (Phase 9)
 
-The end-to-end suite uses the configured PostgreSQL database and launches the built backend, MCP server, and AI chat service on ephemeral local ports. Gemini is replaced with a deterministic function-call fixture so the checks do not require a live provider key; MCP, backend APIs, authorization, Sequelize queries, and tool responses are real. The suite covers two-user registration/login, separate booking lists, movie search and details, booking and payment retrieval, follow-up context, sequential multiple tool calls, cross-user denial, unauthenticated and forged-identity requests, MCP outage handling, and Gemini outage messaging.
+The end-to-end suite uses the configured PostgreSQL database and launches the built backend, MCP server, and AI chat service on ephemeral local ports. Ollama is replaced with a deterministic function-call fixture so the checks do not require a live provider key; MCP, backend APIs, authorization, Sequelize queries, and tool responses are real. The suite covers two-user registration/login, separate booking lists, movie search and details, booking and payment retrieval, follow-up context, sequential multiple tool calls, cross-user denial, unauthenticated and forged-identity requests, MCP outage handling, and Ollama outage messaging.
 
 Use a dedicated test database (`TEST_DATABASE_URL`) before running this command. The suite inserts unique fixtures and removes them after execution:
 
@@ -345,14 +350,14 @@ $env:TEST_DATABASE_URL='postgres://postgres:password@localhost:5432/cinemate_tes
 npm run test:e2e --workspace=@cinemate/ai-client
 ```
 
-This project uses Gemini; Ollama is not configured. The outage check therefore exercises Gemini provider failure and unavailable MCP tools rather than an Ollama server. The existing backend and MCP test suites can also be run with `npm run test --workspace=@cinemate/backend` and `npm run test --workspace=@cinemate/mcp-server`.
+This project uses Ollama. The outage check therefore exercises Ollama provider failure and unavailable MCP tools rather than an Ollama server. The existing backend and MCP test suites can also be run with `npm run test --workspace=@cinemate/backend` and `npm run test --workspace=@cinemate/mcp-server`.
 # Docker deployment
 
-Docker files are provided for the backend, MCP server, AI client, and Next.js frontend. PostgreSQL uses a named persistent volume. The AI client uses the configured Gemini provider. Only the frontend is published to the host; PostgreSQL, Gemini credentials, backend, and MCP ports stay inside the Compose network.
+Docker files are provided for the backend, MCP server, AI client, and Next.js frontend. PostgreSQL uses a named persistent volume. The AI client uses Ollama on the internal Compose network. Only the frontend is published to the host; PostgreSQL, Ollama, backend, and MCP ports stay inside the Compose network.
 
 ## Start locally
 
-1. Copy `.env.docker.example` to `.env.docker` and replace the placeholder passwords, JWT secret, and service token. Set `GEMINI_API_KEY` and `GEMINI_MODEL` for the Gemini provider.
+1. Copy `.env.docker.example` to `.env.docker` and replace the placeholder passwords, JWT secret, and service token. Set `OLLAMA_MODEL` if you want a model other than `llama3.1:8b`. Compose pulls the configured model into the persistent Ollama volume before starting the AI client.
 2. Docker Compose reads the shared container settings from `.env.docker`; the service `.env` files are for running each service directly on the host. The Compose file supplies the internal URLs and binds the MCP and AI servers to the container network.
 3. Always pass the Docker env file because Compose does not load `.env.docker` automatically: `docker compose --env-file .env.docker config`, then `docker compose --env-file .env.docker up --build -d`. The backend waits for healthy Postgres, applies pending migrations and seed data, then starts the API. The demo seeder skips its data when `alex@example.com` already exists, so container restarts do not duplicate the catalog.
 4. Inspect status and logs: `docker compose ps` and `docker compose logs -f backend ai-client mcp-server frontend`.

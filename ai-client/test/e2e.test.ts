@@ -7,7 +7,7 @@ import type { Content, FunctionCall, Part } from '@google/genai';
 import { Client as PgClient } from 'pg';
 import request from 'supertest';
 import type { LlmInterface, LlmResponse } from '../src/llm/llm.interface.js';
-import { GeminiProviderError } from '../src/llm/gemini.provider.js';
+import { OllamaProviderError } from '../src/llm/ollama.provider.js';
 import { createChatApp } from '../src/server/chat-app.js';
 
 const jwtSecret = process.env.JWT_SECRET ?? 'e2e-jwt-secret-must-be-at-least-thirty-two-characters';
@@ -307,7 +307,7 @@ describe('CineMate end-to-end: backend, agent runtime, MCP, and PostgreSQL', () 
     await closeServer(unavailableMcpAiServer);
 
     const failedProvider: LlmInterface = {
-      async generateResponse() { throw new GeminiProviderError('Gemini API request failed', 503, true); },
+      async generateResponse() { throw new OllamaProviderError('Ollama request failed', 503, true); },
     };
     const brokenGeminiApp = chatApp(() => failedProvider);
     unavailableGeminiAiServer = await start(brokenGeminiApp);

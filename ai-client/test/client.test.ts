@@ -10,7 +10,7 @@ import { McpConnectionError, McpToolExecutionError } from '../src/errors.js';
 import type { McpToolResult } from '../src/types/index.js';
 import { runFunctionCallingTurn } from '../src/llm/function-calling.js';
 import type { LlmInterface, LlmResponse } from '../src/llm/llm.interface.js';
-import { GeminiProvider } from '../src/llm/gemini.provider.js';
+import { OllamaProvider } from '../src/llm/ollama.provider.js';
 
 const loadBuiltServer = createRequire(path.resolve(process.cwd(), 'ai-client-test.cjs'));
 const backendBuild = path.resolve(process.cwd(), '../backend/dist/src');
@@ -23,7 +23,7 @@ const backendModels = loadBuiltServer(path.join(backendBuild, 'models/index.js')
 
 const ownerEmail = `client-owner-${randomUUID()}@example.test`;
 const otherEmail = `client-other-${randomUUID()}@example.test`;
-const liveGeminiTest = process.env.RUN_LIVE_GEMINI_TESTS === 'true' && process.env.GEMINI_API_KEY && process.env.GEMINI_MODEL ? it : it.skip;
+const liveOllamaTest = process.env.RUN_LIVE_OLLAMA_TESTS === 'true' && process.env.OLLAMA_MODEL ? it : it.skip;
 const movieId = randomUUID();
 const avatarMovieId = randomUUID();
 const cinemaId = randomUUID();
@@ -154,11 +154,11 @@ describe('independent authenticated MCP client', () => {
     await backendModels.sequelize.close();
   });
 
-  it('connects with a valid JWT and discovers all five MCP tools', async () => {
+  it('connects with a valid JWT and discovers all six MCP tools', async () => {
     expect(ownerClient.state).toBe('connected');
     const result = await ownerClient.listTools();
     expect(result.tools.map((tool) => tool.name).sort()).toEqual([
-      'get_booking_details', 'get_movie_details', 'get_my_bookings', 'get_payment_status', 'search_movies',
+      'get_booking_details', 'get_movie_details', 'get_my_bookings', 'get_my_profile', 'get_payment_status', 'search_movies',
     ]);
   });
 
@@ -259,9 +259,9 @@ describe('independent authenticated MCP client', () => {
     expect(client.state).toBe('disconnected');
   });
 
-  liveGeminiTest('live Gemini selects search_movies for Avatar and produces a final response', async () => {
+  liveOllamaTest('live Ollama selects search_movies for Avatar and produces a final response', async () => {
     const turn = await runFunctionCallingTurn(
-      new GeminiProvider(),
+      new OllamaProvider(),
       ownerClient,
       'Search the movie catalog for Avatar and tell me its genre and language.',
     );

@@ -5,10 +5,16 @@ export interface Movie {
   language: string;
   rating: string | number;
   durationMinutes?: number;
-  synopsis?: string;
+  description?: string;
   posterUrl?: string | null;
   releaseDate?: string;
-  shows?: Array<{ id: string; startTime: string; price: string; cinema?: { name: string; city: string } }>;
+  shows?: Array<{
+    id: string;
+    startsAt: string;
+    endsAt: string;
+    price: string;
+    cinema?: { name: string; city: string };
+  }>;
 }
 
 export interface Booking {
@@ -16,8 +22,29 @@ export interface Booking {
   status: string;
   totalAmount: string;
   createdAt: string;
-  show?: { startTime: string; movie?: { title: string }; cinema?: { name: string } };
+  showId?: string;
+  show?: {
+    startsAt: string;
+    screenName?: string;
+    price?: string;
+    movie?: { title: string };
+    cinema?: { name: string; city?: string };
+  };
   seats?: Array<{ seatNumber: string }>;
+}
+
+export interface ShowAvailability {
+  showId: string;
+  price: string;
+  totalSeats: number;
+  seats: Array<{ number: string; available: boolean }>;
+  show: {
+    id: string;
+    startsAt: string;
+    screenName: string;
+    movie?: { title: string };
+    cinema?: { name: string; city: string };
+  };
 }
 
 export interface ChatMessage {
@@ -29,7 +56,10 @@ export interface ChatMessage {
 }
 
 export class ApiRequestError extends Error {
-  constructor(message: string, public readonly status: number) {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
     super(message);
     this.name = 'ApiRequestError';
   }
@@ -41,11 +71,15 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
     headers: { 'content-type': 'application/json', ...init?.headers },
     cache: 'no-store',
   });
-  const payload = await response.json().catch(() => ({})) as {
+  const payload = (await response.json().catch(() => ({}))) as {
     data?: T;
     error?: { message?: string };
   };
-  if (!response.ok) throw new ApiRequestError(payload.error?.message ?? 'The request could not be completed. Please try again.', response.status);
+  if (!response.ok)
+    throw new ApiRequestError(
+      payload.error?.message ?? 'The request could not be completed. Please try again.',
+      response.status,
+    );
   return payload.data as T;
 }
 
